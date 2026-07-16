@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      # Default: key comes from the .env file (Compose auto-loads it). For a more
+      # hardened setup that keeps the key out of the environment, overlay
+      # docker-compose.secrets.yml (see that file / the README).
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-2}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+    volumes:
+      - wardrobe-data:/app/data # persists uploaded images + the Chroma DB
+    ports:
+      # Bound to localhost only — the API/docs are NOT exposed publicly on a VPS.
+      # The frontend reaches the backend over Compose's internal network instead.
+      # (Reach /docs on a server via an SSH tunnel: ssh -L 8000:localhost:8000 …)
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8080}:80" # open the app at http://localhost:8080
+    restart: unless-stopped
+
+volumes:
+  wardrobe-data:

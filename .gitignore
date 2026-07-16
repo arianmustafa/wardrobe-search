@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Env / secrets
+.env
+secrets/*
+!secrets/*.example
+
+# Local data (uploaded images + vector DB)
+backend/data/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Claude Code local (per-developer) settings
+.claude/settings.local.json
+
+# Editor / OS
+.DS_Store

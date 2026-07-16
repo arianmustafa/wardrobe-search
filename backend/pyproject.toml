@@ -1,0 +1,19 @@
+[project]
+name = "wardrobe-backend"
+version = "0.1.0"
+description = "Semantic clothing search backend (FastAPI + ChromaDB + gemini-embedding-2)"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "google-genai>=1.0",
+    "chromadb>=0.5",
+    "python-multipart>=0.0.9",
+    "pillow>=10.0",
+    "pydantic-settings>=2.0",
+    "numpy>=1.26",
+]
+
+[tool.uv]
+# App, not a distributable package — manage the environment without building it.
+package = false
