@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # Search + image handling.
     default_top_n: int = 12
     max_image_edge: int = 1024  # longest edge (px) of the image sent for embedding
+    max_upload_mb: int = 25  # per-file upload cap; keep in sync with nginx client_max_body_size
 
     # Display calibration: text↔image cosine lives in a compressed band, so a
     # strong match reads as a mediocre "50%". These map the raw cosine range

@@ -50,8 +50,12 @@ export function listItems(): Promise<ItemsResponse> {
   return fetch('/api/items', { cache: 'no-store' }).then((r) => request<ItemsResponse>(r))
 }
 
-export function search(q: string, n = 12): Promise<SearchResponse> {
-  return fetch(`/api/search?q=${encodeURIComponent(q)}&n=${n}`, { cache: 'no-store' }).then((r) =>
+export function search(q: string, n?: number): Promise<SearchResponse> {
+  // Only send `n` when the caller asks for it, so the backend's configured
+  // default (DEFAULT_TOP_N) applies otherwise.
+  const params = new URLSearchParams({ q })
+  if (n !== undefined) params.set('n', String(n))
+  return fetch(`/api/search?${params}`, { cache: 'no-store' }).then((r) =>
     request<SearchResponse>(r)
   )
 }
