@@ -124,6 +124,7 @@ Env vars, from the root `.env` (Docker) or `backend/.env` (local dev):
 | `EMBEDDING_DIM`      | `1536`               | Output dimensionality (128–3072, Matryoshka)   |
 | `DEFAULT_TOP_N`      | `12`                 | Default number of search results               |
 | `MAX_IMAGE_EDGE`     | `1024`               | Longest edge (px) of the image sent to embed   |
+| `MAX_UPLOAD_MB`      | `25`                 | Per-file upload size cap (keep in sync with nginx `client_max_body_size`) |
 | `RELEVANCE_FLOOR`    | `0.30`               | Cosine mapped to 0% relevance (display only)   |
 | `RELEVANCE_CEILING`  | `0.65`               | Cosine mapped to 100% relevance (display only) |
 

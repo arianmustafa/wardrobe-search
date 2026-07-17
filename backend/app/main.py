@@ -1,12 +1,15 @@
 """FastAPI application: upload garment images, embed them, and search by text."""
+import io
 import logging
 import mimetypes
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 
 from . import embeddings, store
 from .config import IMAGES_DIR, get_settings
@@ -34,13 +37,44 @@ app.add_middleware(
 app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}
-EXT_BY_TYPE = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "image/avif": ".avif",
+# Extension by the format PIL actually detects — the client's Content-Type header
+# is only a cheap pre-check, the stored extension comes from the real bytes.
+EXT_BY_FORMAT = {
+    "jpeg": ".jpg",
+    "png": ".png",
+    "webp": ".webp",
+    "gif": ".gif",
+    "avif": ".avif",
 }
+
+
+# Reject absurd pixel counts before decoding — a small compressed file can
+# expand into gigabytes of raster memory (decompression bomb).
+MAX_IMAGE_PIXELS = 50_000_000
+
+
+def _sniff_image_ext(data: bytes) -> str:
+    """Verify the bytes decode as a supported image; return the true extension."""
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            fmt = (img.format or "").lower()
+            width, height = img.size
+            if width * height > MAX_IMAGE_PIXELS:
+                raise HTTPException(
+                    400, f"Image too large: {width}x{height} exceeds pixel limit"
+                )
+            img.verify()
+    except HTTPException:
+        raise
+    except Image.DecompressionBombError:
+        # Pillow refuses extreme pixel counts at open(), before our own check runs.
+        raise HTTPException(400, "Image too large: exceeds pixel limit")
+    except Exception:
+        raise HTTPException(400, "File is not a valid image")
+    ext = EXT_BY_FORMAT.get(fmt)
+    if not ext:
+        raise HTTPException(400, f"Unsupported image format: {fmt or 'unknown'}")
+    return ext
 
 
 def _to_item(meta: dict) -> dict:
@@ -89,21 +123,33 @@ async def create_item(
     file: UploadFile = File(...),
     title: str | None = Form(None),
 ) -> dict:
+    # Cheap pre-check on the declared type only when one is given — non-browser
+    # clients (and some browsers) send no/generic Content-Type, and the bytes
+    # are validated by PIL below regardless.
     content_type = (file.content_type or "").lower()
-    if content_type not in ALLOWED_TYPES:
-        raise HTTPException(400, f"Unsupported file type: {content_type or 'unknown'}")
+    if content_type not in ("", "application/octet-stream") and content_type not in ALLOWED_TYPES:
+        raise HTTPException(400, f"Unsupported file type: {content_type}")
 
-    data = await file.read()
+    # Enforce the size limit here rather than relying on a reverse proxy —
+    # the backend is also reachable directly (dev proxy, localhost).
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    data = await file.read(max_bytes + 1)
     if not data:
         raise HTTPException(400, "Empty file")
+    if len(data) > max_bytes:
+        raise HTTPException(413, f"File too large (max {settings.max_upload_mb} MB)")
+
+    ext = _sniff_image_ext(data)
 
     item_id = uuid.uuid4().hex
-    filename = f"{item_id}{EXT_BY_TYPE.get(content_type, '.jpg')}"
+    filename = f"{item_id}{ext}"
     image_path = IMAGES_DIR / filename
     image_path.write_bytes(data)
 
     try:
-        vector = embeddings.embed_image(data)
+        # The Gemini call is blocking; run it off the event loop so concurrent
+        # requests aren't stalled while an upload embeds.
+        vector = await run_in_threadpool(embeddings.embed_image, data)
     except Exception as exc:  # roll back the saved file if embedding fails
         image_path.unlink(missing_ok=True)
         logger.exception("Embedding failed for upload")
@@ -116,7 +162,12 @@ async def create_item(
         "title": (title or "").strip(),
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
     }
-    store.add_item(item_id, vector, meta)
+    try:
+        store.add_item(item_id, vector, meta)
+    except Exception as exc:  # roll back the saved file if the store insert fails
+        image_path.unlink(missing_ok=True)
+        logger.exception("Storing item failed")
+        raise HTTPException(500, "Failed to store item") from exc
     return _to_item(meta)
 
 
