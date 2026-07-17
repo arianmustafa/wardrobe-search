@@ -5,10 +5,33 @@ import type { HealthResponse, Item, SearchResultItem } from './api'
 
 type DisplayItem = Item | SearchResultItem
 
+const SUGGESTIONS = [
+  'navy linen shirt for summer',
+  'cozy knit for cold evenings',
+  'office-ready blazer',
+  'something for a beach day',
+]
+
+const IMAGE_EXT = /\.(avif|bmp|gif|heic|jpe?g|png|tiff?|webp)$/i
+
+// Items uploaded without a title fall back to their filename on the backend;
+// turn "navy-linen-shirt.jpg" into "navy linen shirt" and hash-named files
+// into a graceful placeholder instead of showing raw hex in the caption.
+function displayTitle(title: string): { text: string; untitled: boolean } {
+  const trimmed = title.trim()
+  if (!trimmed) return { text: 'Untitled', untitled: true }
+  if (!IMAGE_EXT.test(trimmed)) return { text: trimmed, untitled: false }
+  const stem = trimmed.replace(IMAGE_EXT, '')
+  if (/^[0-9a-f-]{12,}$/i.test(stem)) return { text: 'Untitled', untitled: true }
+  return { text: stem.replace(/[-_]+/g, ' '), untitled: false }
+}
+
 export default function App() {
   const [items, setItems] = useState<Item[]>([])
   const [results, setResults] = useState<SearchResultItem[] | null>(null) // null = browsing
   const [query, setQuery] = useState('')
+  const [activeQuery, setActiveQuery] = useState('')
+  const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
@@ -27,31 +50,42 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    refresh()
+    refresh().finally(() => setLoading(false))
     health().then(setStatus).catch(() => {})
   }, [refresh])
 
-  async function onSearch(e: FormEvent) {
-    e.preventDefault()
-    const q = query.trim()
-    if (!q) {
-      setResults(null)
-      return
-    }
+  const runSearch = useCallback(async (q: string) => {
     setSearching(true)
     setError('')
     try {
       const data = await apiSearch(q)
       setResults(data.results)
+      setActiveQuery(q)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setSearching(false)
     }
+  }, [])
+
+  function onSearch(e: FormEvent) {
+    e.preventDefault()
+    const q = query.trim()
+    if (!q) {
+      clearSearch()
+      return
+    }
+    runSearch(q)
+  }
+
+  function onSuggestion(s: string) {
+    setQuery(s)
+    runSearch(s)
   }
 
   function clearSearch() {
     setQuery('')
+    setActiveQuery('')
     setResults(null)
     setError('')
   }
@@ -79,6 +113,7 @@ export default function App() {
         // even if a later file in the batch failed after earlier ones succeeded.
         setResults(null)
         setQuery('')
+        setActiveQuery('')
         await refresh()
       }
       setUploading(false)
@@ -106,31 +141,58 @@ export default function App() {
   const grid: DisplayItem[] = results !== null ? results : items
   const browsing = results === null
 
+  const ticker = [
+    'Semantic closet archive',
+    `${items.length} piece${items.length === 1 ? '' : 's'} indexed`,
+    status ? (status.real_embeddings ? status.model : 'demo mode — placeholder vectors') : null,
+    status ? `${status.embedding_dim}-d cosine space` : null,
+    'text ⇄ image retrieval',
+  ]
+    .filter(Boolean)
+    .join(' ✦ ')
+
   return (
     <div className="app">
-      <header className="header">
-        <div>
-          <h1>Wardrobe</h1>
-          <p className="tagline">Semantic search over your clothes</p>
+      <header className="topbar">
+        <div className="brand">
+          Wardrobe<sup>®</sup>
         </div>
         {status && (
           <span
-            className={`badge ${status.real_embeddings ? 'badge-live' : 'badge-demo'}`}
+            className={`status ${status.real_embeddings ? 'status-live' : 'status-demo'}`}
             title={
               status.real_embeddings
                 ? `Embedding with ${status.model}`
                 : 'No GEMINI_API_KEY set — using placeholder embeddings'
             }
           >
-            {status.real_embeddings ? status.model : 'demo mode'}
+            {status.real_embeddings ? `● live — ${status.model}` : '○ demo mode'}
           </span>
         )}
       </header>
 
+      <div className="ticker" aria-hidden="true">
+        <div className="ticker-track">
+          <span>{ticker}&ensp;✦&ensp;</span>
+          <span>{ticker}&ensp;✦&ensp;</span>
+        </div>
+      </div>
+
+      <section className="hero">
+        <h1>
+          <span className="hero-line">Describe it.</span>
+          <span className="hero-line hero-outline">Wear it.</span>
+        </h1>
+        <p className="hero-note">
+          Photograph each piece once. Then pull it up the way you actually think about it —
+          “warm wool for rainy days”, “something for a beach day”.
+        </p>
+      </section>
+
       <form className="searchbar" onSubmit={onSearch}>
         <input
           type="search"
-          placeholder="Search your wardrobe — e.g. “navy linen shirt for summer”"
+          placeholder="warm wool for rainy days"
           value={query}
           onChange={(e: ChangeEvent<HTMLInputElement>) => {
             const value = e.target.value
@@ -139,15 +201,30 @@ export default function App() {
             if (!value.trim()) clearSearch()
           }}
         />
-        <button type="submit" disabled={searching}>
-          {searching ? 'Searching…' : 'Search'}
-        </button>
         {!browsing && (
           <button type="button" className="ghost" onClick={clearSearch}>
             Clear
           </button>
         )}
+        <button type="submit" disabled={searching}>
+          {searching ? 'Searching…' : 'Search →'}
+        </button>
       </form>
+
+      <div className="chips">
+        <span className="chips-label">Try:</span>
+        {SUGGESTIONS.map((s) => (
+          <button
+            type="button"
+            className="chip"
+            key={s}
+            disabled={searching}
+            onClick={() => onSuggestion(s)}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
 
       <div
         className={`dropzone ${dragOver ? 'dropzone-active' : ''} ${uploading ? 'dropzone-busy' : ''}`}
@@ -187,58 +264,107 @@ export default function App() {
           </div>
         ) : (
           <>
-            <span className="dropzone-icon">＋</span>
-            <span>Drop clothing photos here, or click to upload</span>
+            <span className="dz-plus">+</span>
+            <span className="dz-label">Add pieces</span>
+            <span className="dz-sub">drop images or click to browse</span>
           </>
         )}
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <div className="error">Error: {error}</div>}
 
-      <div className="section-title">
+      <div className="section-head">
         {browsing ? (
-          <span>
-            Your wardrobe <span className="muted">· {items.length} items</span>
-          </span>
+          <h2>
+            Index <span className="count">({loading ? '–' : items.length})</span>
+          </h2>
         ) : (
-          <span>
-            Results for “{query}” <span className="muted">· {grid.length} matches</span>
-          </span>
+          <h2>
+            Results: “{activeQuery}” <span className="count">({grid.length})</span>
+          </h2>
         )}
+        {!browsing && <span className="head-meta">sorted by relevance</span>}
       </div>
 
-      {grid.length === 0 ? (
+      {loading && browsing ? (
+        <div className="grid" aria-hidden="true">
+          {Array.from({ length: 8 }, (_, i) => (
+            <div className="card skeleton" key={i} style={{ animationDelay: `${i * 40}ms` }}>
+              <div className="card-img" />
+              <div className="skeleton-caption" />
+            </div>
+          ))}
+        </div>
+      ) : grid.length === 0 ? (
         <div className="empty">
-          {browsing
-            ? 'No items yet — upload some photos of your clothes to get started.'
-            : 'No matches found.'}
+          {browsing ? (
+            <>
+              <h3>Nothing indexed.</h3>
+              <p>Upload a few photos of your clothes and they become searchable in plain words.</p>
+            </>
+          ) : (
+            <>
+              <h3>No matches.</h3>
+              <p>Try describing the piece differently — fabric, colour, occasion.</p>
+              <button type="button" className="ghost" onClick={clearSearch}>
+                Show everything
+              </button>
+            </>
+          )}
         </div>
       ) : (
-        <div className="grid">
-          {grid.map((item) => {
+        <div
+          className={`grid ${searching ? 'grid-busy' : ''}`}
+          key={browsing ? 'browse' : activeQuery}
+        >
+          {grid.map((item, i) => {
             const result = 'relevance' in item ? item : null
+            const title = displayTitle(item.title)
             return (
-              <figure className="card" key={item.id}>
+              <figure
+                className="card"
+                key={item.id}
+                style={{ animationDelay: `${Math.min(i, 11) * 30}ms` }}
+              >
                 <div className="card-img">
-                  <img src={item.image_url} alt={item.title} loading="lazy" />
+                  <img src={item.image_url} alt={title.text} loading="lazy" />
+                  {result && i === 0 && <span className="tag-best">Best match</span>}
+                  <button
+                    className="delete"
+                    title="Remove"
+                    aria-label={`Remove ${title.text}`}
+                    onClick={() => onDelete(item.id)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <figcaption>
+                  <span className="idx">{String(i + 1).padStart(2, '0')}</span>
+                  <span className={`ttl ${title.untitled ? 'untitled' : ''}`}>{title.text}</span>
                   {result && (
                     <span
-                      className="score"
+                      className="pct"
                       title={`relevance ${(result.relevance * 100).toFixed(0)}% · cosine ${result.score.toFixed(3)}`}
                     >
                       {(result.relevance * 100).toFixed(0)}%
                     </span>
                   )}
-                  <button className="delete" title="Remove" onClick={() => onDelete(item.id)}>
-                    ×
-                  </button>
-                </div>
-                <figcaption>{item.title}</figcaption>
+                </figcaption>
               </figure>
             )
           })}
         </div>
       )}
+
+      <footer className="footer">
+        <span>Wardrobe® — semantic closet archive</span>
+        {status && (
+          <span>
+            {items.length} piece{items.length === 1 ? '' : 's'} ·{' '}
+            {status.real_embeddings ? status.model : 'placeholder vectors (demo)'}
+          </span>
+        )}
+      </footer>
     </div>
   )
 }
