@@ -48,12 +48,27 @@ EXT_BY_FORMAT = {
 }
 
 
+# Reject absurd pixel counts before decoding — a small compressed file can
+# expand into gigabytes of raster memory (decompression bomb).
+MAX_IMAGE_PIXELS = 50_000_000
+
+
 def _sniff_image_ext(data: bytes) -> str:
     """Verify the bytes decode as a supported image; return the true extension."""
     try:
         with Image.open(io.BytesIO(data)) as img:
             fmt = (img.format or "").lower()
+            width, height = img.size
+            if width * height > MAX_IMAGE_PIXELS:
+                raise HTTPException(
+                    400, f"Image too large: {width}x{height} exceeds pixel limit"
+                )
             img.verify()
+    except HTTPException:
+        raise
+    except Image.DecompressionBombError:
+        # Pillow refuses extreme pixel counts at open(), before our own check runs.
+        raise HTTPException(400, "Image too large: exceeds pixel limit")
     except Exception:
         raise HTTPException(400, "File is not a valid image")
     ext = EXT_BY_FORMAT.get(fmt)
@@ -108,9 +123,12 @@ async def create_item(
     file: UploadFile = File(...),
     title: str | None = Form(None),
 ) -> dict:
+    # Cheap pre-check on the declared type only when one is given — non-browser
+    # clients (and some browsers) send no/generic Content-Type, and the bytes
+    # are validated by PIL below regardless.
     content_type = (file.content_type or "").lower()
-    if content_type not in ALLOWED_TYPES:
-        raise HTTPException(400, f"Unsupported file type: {content_type or 'unknown'}")
+    if content_type not in ("", "application/octet-stream") and content_type not in ALLOWED_TYPES:
+        raise HTTPException(400, f"Unsupported file type: {content_type}")
 
     # Enforce the size limit here rather than relying on a reverse proxy —
     # the backend is also reachable directly (dev proxy, localhost).
