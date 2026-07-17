@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChangeEvent, DragEvent, FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, DragEvent, FormEvent, KeyboardEvent } from 'react'
 import { deleteItem, health, listItems, search as apiSearch, uploadItem } from './api'
 import type { HealthResponse, Item, SearchResultItem } from './api'
 
@@ -39,6 +39,28 @@ export default function App() {
   const [error, setError] = useState('')
   const [status, setStatus] = useState<HealthResponse | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // Per-file titling flow: selected files wait here while each is offered a
+  // title in a dialog; uploads start only after the last prompt.
+  const [titling, setTitling] = useState<{
+    files: File[]
+    titles: string[]
+    index: number
+  } | null>(null)
+  const [titleDraft, setTitleDraft] = useState('')
+  const titleInputRef = useRef<HTMLInputElement>(null)
+
+  const previewUrl = useMemo(
+    () => (titling ? URL.createObjectURL(titling.files[titling.index]) : null),
+    [titling]
+  )
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
+  useEffect(() => {
+    if (titling) titleInputRef.current?.focus()
+  }, [titling])
 
   const refresh = useCallback(async () => {
     try {
@@ -90,10 +112,46 @@ export default function App() {
     setError('')
   }
 
-  async function handleFiles(fileList: FileList | null) {
-    if (uploading || !fileList) return
+  function handleFiles(fileList: FileList | null) {
+    if (uploading || titling || !fileList) return
     const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'))
+    // Reset now so the same files can be re-selected later, even after Cancel.
+    if (fileRef.current) fileRef.current.value = ''
     if (!files.length) return
+    setError('')
+    setTitleDraft('')
+    setTitling({ files, titles: [], index: 0 })
+  }
+
+  function advanceTitling(title: string) {
+    if (!titling) return
+    const titles = [...titling.titles, title.trim()]
+    setTitleDraft('')
+    if (titles.length < titling.files.length) {
+      setTitling({ ...titling, titles, index: titling.index + 1 })
+    } else {
+      setTitling(null)
+      uploadBatch(titling.files, titles)
+    }
+  }
+
+  function cancelTitling() {
+    setTitling(null)
+    setTitleDraft('')
+  }
+
+  // The primary button doubles as the skip affordance: with an empty field it
+  // announces that continuing without a title is fine.
+  function titleSubmitLabel(): string {
+    if (!titling) return ''
+    const last = titling.index + 1 === titling.files.length
+    const typed = titleDraft.trim().length > 0
+    if (!last) return typed ? 'Next →' : 'Skip →'
+    const action = titling.files.length > 1 ? 'upload all' : 'upload'
+    return typed ? `${action[0].toUpperCase()}${action.slice(1)} →` : `Skip & ${action} →`
+  }
+
+  async function uploadBatch(files: File[], titles: string[]) {
     setUploading(true)
     setError('')
     setProgress({ done: 0, total: files.length })
@@ -104,7 +162,7 @@ export default function App() {
       // abort the rest of the batch; report a summary at the end.
       for (let i = 0; i < files.length; i++) {
         try {
-          await uploadItem(files[i])
+          await uploadItem(files[i], titles[i] || undefined)
           uploaded += 1
         } catch (e) {
           failures.push(`${files[i].name}: ${(e as Error).message}`)
@@ -128,7 +186,6 @@ export default function App() {
       }
       setUploading(false)
       setProgress(null)
-      if (fileRef.current) fileRef.current.value = ''
     }
   }
 
@@ -240,12 +297,12 @@ export default function App() {
         className={`dropzone ${dragOver ? 'dropzone-active' : ''} ${uploading ? 'dropzone-busy' : ''}`}
         onDragOver={(e) => {
           e.preventDefault()
-          if (!uploading) setDragOver(true)
+          if (!uploading && !titling) setDragOver(true)
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => {
-          if (!uploading) fileRef.current?.click()
+          if (!uploading && !titling) fileRef.current?.click()
         }}
       >
         <input
@@ -280,6 +337,64 @@ export default function App() {
           </>
         )}
       </div>
+
+      {titling && (
+        <div
+          className="modal-backdrop"
+          onClick={cancelTitling}
+          onDragOver={(e: DragEvent<HTMLDivElement>) => e.preventDefault()}
+          onDrop={(e: DragEvent<HTMLDivElement>) => e.preventDefault()}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Title this piece"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+              if (e.key === 'Escape') cancelTitling()
+            }}
+          >
+            <div className="modal-head">
+              <span>Title this piece</span>
+              {titling.files.length > 1 && (
+                <span className="modal-count">
+                  {titling.index + 1} / {titling.files.length}
+                </span>
+              )}
+            </div>
+            {previewUrl && (
+              <img
+                className="modal-preview"
+                src={previewUrl}
+                alt={titling.files[titling.index].name}
+              />
+            )}
+            <div className="modal-filename">{titling.files[titling.index].name}</div>
+            <form
+              onSubmit={(e: FormEvent) => {
+                e.preventDefault()
+                advanceTitling(titleDraft)
+              }}
+            >
+              <input
+                ref={titleInputRef}
+                type="text"
+                placeholder="e.g. navy linen shirt"
+                aria-label="Title"
+                value={titleDraft}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setTitleDraft(e.target.value)}
+              />
+              <div className="modal-actions">
+                <button type="button" className="ghost" onClick={cancelTitling}>
+                  Cancel
+                </button>
+                <button type="submit">{titleSubmitLabel()}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {error && <div className="error">Error: {error}</div>}
 
