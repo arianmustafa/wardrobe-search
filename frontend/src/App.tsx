@@ -221,9 +221,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
-          Wardrobe<sup>®</sup>
-        </div>
+        <div className="brand">Wardrobe</div>
         {status && (
           <span
             className={`status ${status.real_embeddings ? 'status-live' : 'status-demo'}`}
@@ -482,7 +480,7 @@ export default function App() {
       )}
 
       <footer className="footer">
-        <span>Wardrobe® — semantic closet archive</span>
+        <span>Wardrobe — semantic closet archive</span>
         {status && (
           <span>
             {items.length} piece{items.length === 1 ? '' : 's'} ·{' '}

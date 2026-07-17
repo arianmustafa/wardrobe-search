@@ -97,13 +97,6 @@ body {
   font-variation-settings: 'wdth' 125;
 }
 
-.brand sup {
-  font-size: 10px;
-  font-weight: 600;
-  vertical-align: super;
-  margin-left: 2px;
-}
-
 .status {
   font-size: 11px;
   white-space: nowrap;
@@ -798,4 +791,13 @@ figcaption {
   gap: 8px;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+/* The archive ticker is the one deliberately kinetic element — keep it moving
+   even when the OS asks for reduced motion (explicit owner preference). */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track {
+    animation-duration: 36s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
