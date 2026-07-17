@@ -17,3 +17,12 @@ dependencies = [
 [tool.uv]
 # App, not a distributable package — manage the environment without building it.
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]

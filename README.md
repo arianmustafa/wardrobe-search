@@ -1,5 +1,7 @@
 # Wardrobe — Semantic Clothing Search
 
+[![CI](https://github.com/arianmustafa/wardrobe-search/actions/workflows/ci.yml/badge.svg)](https://github.com/arianmustafa/wardrobe-search/actions/workflows/ci.yml)
+
 Upload photos of your clothes, embed them with Google's multimodal
 `gemini-embedding-2` model, and search your wardrobe with natural language
 (e.g. _"navy linen shirt for summer"_). Images and text queries live in the same
@@ -86,6 +88,20 @@ pnpm dev
 
 Open <http://localhost:5173>. The Vite dev server proxies `/api` and `/images`
 to the backend, so no CORS setup is needed.
+
+## Tests & CI
+
+Backend unit tests run fully offline — no API key needed (they use the
+demo-mode embeddings against a temp data directory):
+
+```bash
+cd backend
+uv run pytest
+```
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the
+backend tests and the frontend typecheck + build on every push to `main` and
+every pull request.
 
 ## Deploying to a VPS
 
