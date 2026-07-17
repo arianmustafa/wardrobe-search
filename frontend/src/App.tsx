@@ -30,7 +30,7 @@ export default function App() {
   const [items, setItems] = useState<Item[]>([])
   const [results, setResults] = useState<SearchResultItem[] | null>(null) // null = browsing
   const [query, setQuery] = useState('')
-  const [activeQuery, setActiveQuery] = useState('')
+  const [activeQuery, setActiveQuery] = useState('') // the query the shown results belong to
   const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -98,14 +98,24 @@ export default function App() {
     setError('')
     setProgress({ done: 0, total: files.length })
     let uploaded = 0
+    const failures: string[] = []
     try {
+      // Keep going past individual failures so one bad file doesn't silently
+      // abort the rest of the batch; report a summary at the end.
       for (let i = 0; i < files.length; i++) {
-        await uploadItem(files[i])
-        uploaded += 1
+        try {
+          await uploadItem(files[i])
+          uploaded += 1
+        } catch (e) {
+          failures.push(`${files[i].name}: ${(e as Error).message}`)
+        }
         setProgress({ done: i + 1, total: files.length })
       }
-    } catch (e) {
-      setError((e as Error).message)
+      if (failures.length) {
+        setError(
+          `${uploaded} of ${files.length} uploaded, ${failures.length} failed — ${failures.join('; ')}`
+        )
+      }
     } finally {
       if (uploaded > 0) {
         // Return to the wardrobe view so freshly-added items are always visible

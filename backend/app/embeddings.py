@@ -49,17 +49,18 @@ def _fake_embedding(seed: bytes) -> list[float]:
 
 
 def _downscale_for_embedding(image_bytes: bytes) -> tuple[bytes, str]:
-    """Shrink to a sane size + re-encode as JPEG to cut latency and cost."""
-    try:
-        img = Image.open(io.BytesIO(image_bytes))
-        img = img.convert("RGB")
-        img.thumbnail((settings.max_image_edge, settings.max_image_edge))
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=90)
-        return buf.getvalue(), "image/jpeg"
-    except Exception as exc:  # corrupt/unsupported image — let caller's error surface
-        logger.warning("Could not preprocess image, sending original bytes: %s", exc)
-        return image_bytes, "image/jpeg"
+    """Shrink to a sane size + re-encode as JPEG to cut latency and cost.
+
+    Uploads are validated as decodable images before reaching this point, so a
+    failure here is unexpected — propagate it rather than sending unprocessed
+    bytes with a mime type we can't vouch for.
+    """
+    img = Image.open(io.BytesIO(image_bytes))
+    img = img.convert("RGB")
+    img.thumbnail((settings.max_image_edge, settings.max_image_edge))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue(), "image/jpeg"
 
 
 def embed_image(image_bytes: bytes) -> list[float]:
